@@ -92,3 +92,30 @@ test("a 45-minute classic ride costs 50 UAH", () => {
 test("a return before the pickup is rejected", () => {
   assert.throws(() => quote(ride("2026-09-16T08:00:00Z", "2026-09-16T07:00:00Z"), standard), QuoteError);
 });
+
+// Section 4 (docs/spec/tariffs.md:147-149): invalid data — no price, the request is rejected with an
+// explanation. The explanation text is not specified, so only its presence is checked (as in
+// test/spec/invalid-input.test.js). A QuoteError is what POST /api/quote turns into 400
+// (src/server.js:38); any other error becomes 500 "internal error" with no explanation.
+const rejectedWithExplanation = (err) => err instanceof QuoteError && err.message.trim() !== "";
+
+test("a missing ride is rejected with an explanation, not a crash", () => {
+  // `{ "ride": null }` in the request body reaches quote() as is (src/server.js:33).
+  for (const missing of [null, undefined]) {
+    assert.throws(() => quote(missing, standard), rejectedWithExplanation, String(missing));
+  }
+});
+
+// Розд. 2 (docs/spec/tariffs.md:37): every time is Kyiv time; the format is not specified (W-10 in
+// docs/test-cases.md). A date only may be rejected or read as 00:00 in Kyiv — never as 00:00 UTC.
+// Kyiv: 00:00 → 03:20 = 200 min → 7 blocks × 2500 = 17500, all at night − 30 % = 12250 (T3, T10).
+test("розд. 2: a pickup given as a date only is rejected or read as 00:00 in Kyiv, never in UTC", () => {
+  let total;
+  try {
+    total = quote(ride("2026-09-16", "2026-09-16T03:20:00+03:00"), standard).total;
+  } catch (err) {
+    assert.ok(rejectedWithExplanation(err), `a rejection must be a QuoteError with a message, got ${err}`);
+    return;
+  }
+  assert.equal(total, 12250);
+});
